@@ -1,0 +1,65 @@
+import os
+import numpy as np
+import cv2
+import tensorflow as tf
+from tensorflow.keras.applications import MobileNetV2
+from tensorflow.keras.applications.mobilenet_v2 import preprocess_input
+from tensorflow.keras.preprocessing.image import img_to_array
+
+model = MobileNetV2(weights="imagenet", include_top=False, pooling="avg")
+
+def load_and_preprocess_image(path, target_size=(224,224)):
+    img = cv2.imread(path)
+    if img is None:
+        raise ValueError(f"Failed to load image {path}")
+    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    img = cv2.resize(img, target_size)
+    img = img_to_array(img)
+    img = np.expand_dims(img, axis=0)
+    img = preprocess_input(img)
+    return img
+
+def get_feature_vector(image_tensor):
+    features = model.predict(image_tensor)
+    features = features / np.linalg.norm(features)
+    return features.flatten()
+
+def cosine_similarity(vec1, vec2):
+    return np.dot(vec1, vec2)
+
+def find_best_matches(tile_folder, drone_folder):
+    tile_features = []
+    tile_files = []
+    print("Loading tiles and extracting features...")
+    for fname in os.listdir(tile_folder):
+        if fname.lower().endswith(('.jpg','.jpeg','.png','.tif','.tiff')):
+            fpath = os.path.join(tile_folder, fname)
+            img_tensor = load_and_preprocess_image(fpath)
+            feat = get_feature_vector(img_tensor)
+            tile_features.append(feat)
+            tile_files.append(fname)
+
+    drone_files = [f for f in os.listdir(drone_folder) if f.lower().endswith(('.jpg','.jpeg','.png','.tif','.tiff'))]
+    print(f"Found {len(drone_files)} drone snapshots.")
+
+    for drone_fname in drone_files:
+        drone_path = os.path.join(drone_folder, drone_fname)
+        print(f"\nProcessing drone snapshot: {drone_fname}")
+        drone_tensor = load_and_preprocess_image(drone_path)
+        drone_feat = get_feature_vector(drone_tensor)
+
+        best_score = -1
+        best_tile = None
+        for i, feat in enumerate(tile_features):
+            score = cosine_similarity(drone_feat, feat)
+            if score > best_score:
+                best_score = score
+                best_tile = tile_files[i]
+
+        print(f"Best matching tile: {best_tile} with similarity {best_score:.4f}")
+
+if __name__ == "__main__":
+    tiles_dir = os.path.join(os.getcwd(), "tiles")
+    drone_dir = os.path.join(os.getcwd(), "DRONE_SNAP")
+
+    find_best_matches(tiles_dir, drone_dir)
